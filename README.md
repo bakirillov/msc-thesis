@@ -4,7 +4,7 @@ Paper coming soon
 
 ### How to run?
 
-1. Download the test models () and index (https://drive.google.com/open?id=1O19ZxEu7fPeQ5jHYGH12aZmU7ms3TdbK)
+1. Download the test models (https://drive.google.com/open?id=16vpNypJoY9_5_agDy-YWIICSG1ZjSybj) and index (https://drive.google.com/open?id=1O19ZxEu7fPeQ5jHYGH12aZmU7ms3TdbK)
 2. Unpack the test folder into models
 3. Unpack ecoli.pkl to indices
 4. Run python cad.py   
