@@ -17,6 +17,9 @@ Watch this video - https://www.youtube.com/watch?v=_Bpsv2EyyAg
 ### Notes
 For a large genome full-scale off-target search takes a lot of time. Try search with only preselected guides.
 
+### Cpf1 off-target set
+https://gist.github.com/bakirillov/5a07565f7b608da8dfc2e182ef9a0696
+
 ### To do
 1. Release Cpf1 model pack
 2. Release Cas9 model pack based on DeepCRISPR
