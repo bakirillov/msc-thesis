@@ -1,5 +1,5 @@
-# crisprcad
-Thesis project - CRISPR CAD   
+# CRISPR CAD
+Thesis project
 Paper coming soon   
 
 ### How to run?
