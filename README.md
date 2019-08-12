@@ -12,7 +12,7 @@ Paper coming soon
 Alternatively, try building Docker image with docker build and run it with docker run.
 
 ### How to use?
-Watch this video - https://www.youtube.com/watch?v=_Bpsv2EyyAg
+Watch this video - https://www.youtube.com/watch?v=_Bpsv2EyyAg (OUTDATED!)
 
 ### Notes
 For a large genome full-scale off-target search takes a lot of time. Try search with only preselected guides.
