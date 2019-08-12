@@ -45,4 +45,4 @@ COPY . /app
 RUN which python
 RUN sudo python ./download_models.py
 
-CMD ["sudo python", "cad.py"]
+CMD ["sudo /home/ubuntu/anaconda3/bin/python", "cad.py"]
