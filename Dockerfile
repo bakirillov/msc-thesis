@@ -6,7 +6,7 @@ RUN apt update
 RUN apt install -y build-essential python3.6 python3.6-dev python3-pip python3.6-venv
 RUN apt install -y git
 RUN apt -y install libcairo2-dev
-RUN apt install -y libsm6 libxext6 libfontconfig1 libxrender1
+RUN apt install -y libsm6 libxext6 libfontconfig1 libxrender1 wget
 RUN python3.6 -m pip install pip --upgrade
 RUN python3.6 -m pip install wheel
 RUN pip install --upgrade setuptools
