@@ -43,6 +43,6 @@ RUN which python
 
 COPY . /app
 RUN which python
-RUN python ./download_models.py
+RUN sudo python ./download_models.py
 
-CMD ["python", "cad.py"]
+CMD ["sudo python", "cad.py"]
