@@ -5,6 +5,7 @@ WORKDIR /app
 RUN apt update
 RUN apt install -y build-essential python3.6 python3.6-dev python3-pip python3.6-venv
 RUN apt install -y git
+RUN git clone https://github.com/bakirillov/capsules
 RUN apt -y install libcairo2-dev
 RUN apt-get install -y wget bzip2
 RUN apt-get -y install sudo
@@ -32,7 +33,6 @@ RUN pip install vedis
 RUN pip install scikit-image
 RUN pip install -U scikit-learn
 RUN pip install catboost
-RUN git clone https://github.com/bakirillov/capsules
 RUN pip install umap-learn
 RUN pip install biopython
 RUN apt install -y --fix-missing libpango1.0-dev
