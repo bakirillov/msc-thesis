@@ -31,7 +31,6 @@ RUN pip install dash==0.39
 RUN pip install vedis
 RUN pip install scikit-image
 RUN pip install -U scikit-learn
-RUN pip install tpot
 RUN pip install catboost
 RUN git clone https://github.com/bakirillov/capsules
 RUN pip install umap-learn
