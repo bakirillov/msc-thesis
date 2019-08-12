@@ -35,7 +35,7 @@ RUN pip install -U scikit-learn
 RUN pip install catboost
 RUN pip install umap-learn
 RUN pip install biopython
-RUN apt install -y --fix-missing libpango1.0-dev
+RUN sudo apt install -y --fix-missing libpango1.0-dev
 RUN pip install weasyprint
 RUN pip install googledrivedownloader
 
