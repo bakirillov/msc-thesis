@@ -15,6 +15,7 @@ import pickle as pkl
 import os.path as op
 from Bio import SeqIO
 from tqdm import tqdm
+from time import time
 from vicinity import *
 from vedis import Vedis
 from Bio.Seq import Seq
@@ -32,8 +33,8 @@ from catboost import CatBoostRegressor
 from urllib.parse import quote as urlquote
 from scipy.spatial.distance import euclidean
 from jinja2 import Environment, FileSystemLoader
+from dash.dependencies import Input, State, Output
 from Bio.SeqFeature import SeqFeature, FeatureLocation
-from dash.dependencies import Input, State, Output#, Event
 
 
 class Logic():
@@ -43,7 +44,8 @@ class Logic():
         with open(config, "r") as ih:
             self.states = json.load(ih)
         self.set_state(self.states[self.states["default"]])
-        self.report_config = self.states["report"]
+        self.on_report = self.states["on-target report"]
+        self.off_report = self.states["on-target report"]
         self.k = self.states["k_neighbors"]
         self.offtarget_batch_size = self.states["offtarget_batch_size"]
         
@@ -55,6 +57,12 @@ class Logic():
         else:
             self.on_model = torch.load(state["on"], map_location="cpu")
             self.off_model = torch.load(state["off"], map_location="cpu")
+        for m in self.on_model.modules():
+            if 'Conv' in str(type(m)):
+                setattr(m, 'padding_mode', 'zeros')
+        for m in self.off_model.modules():
+            if 'Conv' in str(type(m)):
+                setattr(m, 'padding_mode', 'zeros')
         self.reg_type = state["reg_type"]
         self.minl = state["min"]
         self.maxl = state["max"]
@@ -159,109 +167,67 @@ class Logic():
             "".join(list(filter(lambda x: not re.match("^>.+$", x), s.split("\n")))).replace(" ", "")
         )
 
+    
+def get_random_fn(ext):
+    randpath = np.random.choice(np.arange(0, 10), (16,))
+    randpath = "".join([str(a) for a in randpath])
+    randpath = op.join("reports", randpath+"."+ext)
+    return(randpath)
 
-class Reporter():
-    
-    def __init__(self, config):
-        with open(config, "r") as ih:
-            self.state = json.load(ih)
-        self.env = Environment(loader=FileSystemLoader('.'))
-        self.on = self.env.get_template(self.state["ontarget"])
-        self.db = Vedis(":mem:")
-        
-    def get_on_html(self, all_data, cart):
-        template_vars = {
-            "gc": cart.to_html(),
-            "ott": all_data.to_html()
-        }
-        return(self.on.render(template_vars))
-    
-    def get_pdf(self, html):
-        randpath = Reporter.get_random_fn("pdf")
-        HTML(string=html).write_pdf(
-            randpath, stylesheets=[CSS(string='body { font-family: monospace !important }')]
-        )
-        return(randpath)
-    
-    @staticmethod
-    def get_random_fn(ext):
-        randpath = np.random.choice(np.arange(0, 10), (16,))
-        randpath = "".join([str(a) for a in randpath])
-        randpath = op.join("reports", randpath+"."+ext)
-        return(randpath)
-    
-    @staticmethod
-    def parse_vedis(s):
-        ff = lambda x: x != ""
-        u = str(s)
-        for a in ["\\n", "b'[", "b\"[", "]'", "]\""]:
-            u = u.replace(a, "")
-        return(list(filter(ff, u.split(" "))))
-    
-    @staticmethod
-    def val_float(x):
-        if x[-1] == ".":
-            x += "0"
-        return(float(x))
-    
-    @staticmethod
-    def val_int(x):
-        return(int(re.sub("[^0-9\-]", "", x)))
-    
-    def get_data(self, sid):
-        activities = [Reporter.val_float(a) for a in Reporter.parse_vedis(self.db[sid+"_activity"])]
-        n_off = [Reporter.val_float(a) for a in Reporter.parse_vedis(self.db[sid+"_OTS"])]
-        labels = [Reporter.val_int(a) for a in Reporter.parse_vedis(self.db[sid+"_label"])]
-        strands = [Reporter.val_int(a) for a in Reporter.parse_vedis(self.db[sid+"_strand"])]
-        gd = np.array(Reporter.parse_vedis(self.db[sid+"_guide"])).reshape((len(strands),4))
-        act_n = [Reporter.val_int(a) for a in Reporter.parse_vedis(self.db[sid+"_#offtargets"])]
-        return(activities, n_off, labels, strands, gd, act_n)
-    
-    def get_df(self, sid):
-        activities, _, labels, strands, gd, n_off = self.get_data(sid)
-        guides = [re.sub("[^ATGC]", "", a) for a in gd[:, 0]]
-        starts = [Reporter.val_int(a) for a in gd[:, 1]]
-        ends = [Reporter.val_int(a) for a in gd[:, 2]]
-        pams = [re.sub("[^ATGC]", "", a) for a in gd[:, 3]]
-        r = pd.DataFrame(
-            {
-               "guide": guides, 
-               "label": labels,
-               "activity": activities, "strand": strands,
-               "start": starts, "end": ends, "PAM": pams, "#offtargets": n_off,
-            }, columns=["guide", "label", "activity", "#offtargets", "strand", "start", "end", "PAM"]
-        )
-        return(r)
-    
-    def get_fasta(self, df):
-        records = []
-        for a in df.index:
-            d = "activity:"+str(df.ix[a]["activity"])+";label:"+str(df.ix[a]["label"])
-            d += ";strand:"+str(df.ix[a]["strand"])+";position:"+str(df.ix[a]["start"])+"-"
-            d += str(df.ix[a]["end"])+";PAM:"+df.ix[a]["PAM"]+";#offtargets:"+str(df.ix[a]["#offtargets"])
-            records.append(
-                SeqRecord(
-                    Seq(df.ix[a]["guide"], IUPAC.unambiguous_dna),
-                    id=str(a), description=d
-                )
-            )
-        randpath = Reporter.get_random_fn("fasta")
-        SeqIO.write(records, randpath, "fasta")
-        return(randpath)
-    
-    def get_csv(self, df):
-        randpath = Reporter.get_random_fn("csv")
-        df.to_csv(randpath)
-        return(randpath)
-    
-    @staticmethod
-    def zip_file(files):
-        randpath = Reporter.get_random_fn("zip")
-        with ZipFile(randpath, "w") as z: 
-            for i in files:
-                z.write(i)
-                os.remove(i)
-        return(randpath)
+def zip_file(files):
+    randpath = get_random_fn("zip")
+    with ZipFile(randpath, "w") as z: 
+        for i in files:
+            z.write(i)
+            os.remove(i)
+    return(randpath)
+
+def get_fasta(df):
+    ds = []
+    for a in df.index:
+        d = ""
+        for b in df.columns:
+            #u = df.loc[a][b] if type(df.loc[a][b]) != tuple else ";".join([str(c) for c in df.loc[a][b]])
+            d += b+":"+str(df.loc[a][b])+";"
+        ds.append(d)
+    records = [
+        SeqRecord(Seq(a, IUPAC.unambiguous_dna), description=d) 
+            for a,b in zip(df["sequence"].values, ds)
+    ]
+    randpath = get_random_fn("fasta")
+    SeqIO.write(records, randpath, "fasta")
+    return(randpath)
+
+def get_on_html(data, template_file):
+    env = Environment(loader=FileSystemLoader('.'))
+    on = env.get_template(template_file)#config["on-target report"])
+    templates_vars = {
+        "gc": data.to_html()
+    }
+    chosen = data[data["chosen?"] == True]
+    templates_vars["ott"] = chosen.to_html()
+    html = on.render(templates_vars)
+    randpath_pdf = get_random_fn("pdf")
+    HTML(string=html).write_pdf(
+        randpath_pdf, stylesheets=[CSS(string='body { font-family: monospace !important }')]
+    )
+    randpath_fasta_all = get_fasta(data)
+    randpath_fasta_chosen = get_fasta(chosen)
+    return(randpath_pdf, randpath_fasta_all, randpath_fasta_chosen)
+
+def get_off_html(data, template_file):
+    env = Environment(loader=FileSystemLoader('.'))
+    off = env.get_template(template_file)
+    templates_vars = {
+        "gc": data.to_html()
+    }
+    html = off.render(templates_vars)
+    randpath_pdf = get_random_fn("pdf")
+    HTML(string=html).write_pdf(
+        randpath_pdf, stylesheets=[CSS(string='body { font-family: monospace !important }')]
+    )
+    randpath_fasta = get_fasta(data)
+    return(randpath_pdf, randpath_fasta)
 
     
 class Plotter():
@@ -270,7 +236,6 @@ class Plotter():
         self.label_colors = {
             0:"blue", 1:"red", 2:"black"
         }
-        #self.hovermode = "closest"
         self.margin = {'l': 40, 'b': 40, 't': 10, 'r': 10}
         self.legend={'x': 0, 'y': 1}
         self.sizes = [16, 32, 8]
@@ -429,6 +394,21 @@ logoworker = LogoWorker("./logos/")
 image_directory = "./logos/"
 static_image_route = "/static/"
 
+PORT = int(os.environ.get('PORT', 5000))
+
+
+if not op.exists("./logos/"):
+    os.makedirs("./logos/")
+else:
+    shutil.rmtree("./logos/")
+    os.makedirs("./logos/")
+
+if not op.exists("./reports/"):
+    os.makedirs("./reports/")
+else:
+    shutil.rmtree("./reports/")
+    os.makedirs("./reports/")
+
 if op.exists(image_directory):
     shutil.rmtree(image_directory)
     os.makedirs(image_directory)
@@ -441,20 +421,20 @@ app.layout = html.Div([
     html.Div(session_id, id='session-id', style={'display': 'none'}),
     dcc.Tabs(id="tabs", value="tab-1", children=[
         dcc.Tab(label="Settings", value="tab-1"),
-        dcc.Tab(label="Operations", value="tab-2")
+        dcc.Tab(label="On-target", value="tab-2"),
+        dcc.Tab(label="Off-target", value="tab-3")
     ]),
     html.Div(id="tabs-content"),
     dcc.Store(id="effector-store"),
     dcc.Store(id="dna-store"),
     dcc.Store(id="cart-store"),
-    dcc.Store(id="mode-store"),
     dcc.Store(id="organism-store"),
     dcc.Store(id="ontarget-report-store"),
     dcc.Store(id="mismatch-store")
 ])
 app.config['suppress_callback_exceptions']=True
 logic = Logic("config.json")
-reporter = Reporter("report.config.json")
+#reporter = Reporter(logic.states["report"])#"report.config.json")
 effectors = np.array([a for a in logic.states])
 effectors = effectors[effectors != "report"]
 effectors = effectors[effectors != "default"]
@@ -466,7 +446,6 @@ plotter = Plotter()
 with open(logic.states["off_target_indices"][0], "rb") as ih:
     current_index = pkl.load(ih)
 app_state = {}
-plausible_ots = {}
 offtarget_predictions = {}
 
 
@@ -476,18 +455,21 @@ offtarget_predictions = {}
     [
         State("dna-store", "data"), State("effector-store", "data"),
         State("organism-store", "data"), State("cart-store", "data"),
-        State("mode-store", "data"), State("mismatch-store", "data")
+        State("mismatch-store", "data")
     ]
 )
-def render_content(tab, sid, dna, effector, organism, cart, mode, n_mm):
+def render_content(tab, sid, dna, effector, organism, cart, n_mm):
+    #print(sid in app_state)
+    plausible_ots = {}
+    if sid not in app_state:
+        print("Not in state")
+        app_state[sid] = {}
+        app_state[sid]["cart"] = []
+        app_state[sid]["offtargets"] = {}
     if not n_mm:
         n_mm = 6
     else:
         n_mm = n_mm["mismatches"]
-    if not mode:
-        mode = "space"
-    else:
-        mode = mode["mode"]
     if not cart:
         cart = []
     else:
@@ -498,7 +480,57 @@ def render_content(tab, sid, dna, effector, organism, cart, mode, n_mm):
         return(
             html.Div([input_sector(), copyright()])
         )
+    elif tab == "tab-3":
+        guides = [a.split(",")[0] for a in app_state[sid]["cart"]]
+        guides_oh = np.stack([correct_order(onehot(a)) for a in guides])
+        guides_a = logic.regress(logic.predict(guides_oh)[0].reshape((guides_oh.shape[0], 64)))
+        app_state[sid]["cart_activities"] = guides_a
+        pams = [a.split(",")[3][0] for a in app_state[sid]["cart"]]
+        full_guides = [a+b if not logic.pam_before else b+a for a,b in zip(guides, pams)]
+        full_targets = np.array([
+            b+p[0] if not logic.pam_before else p[-1]+b 
+                for b,p in list(zip(current_index["sequences"], current_index["PAM"]))
+        ])
+        full_targets_oh = np.stack([correct_order(onehot(a)) for a in full_targets])
+        plausible_ots = {}
+        mmsses = []
+        ohs = []
+        start_time = time()
+        for full_guide in tqdm(full_guides):
+            ohs.append(correct_order(onehot(full_guide)))
+            mmsses.append(
+                np.apply_along_axis(lambda x: np.sum(np.abs(x-ohs[-1])), 1, full_targets_oh)
+            )
+        print("all "+str(time()-start_time))
+        for full_guide, full_guide_oh, current_mms in tqdm(zip(full_guides, ohs, mmsses)):
+            plausible_ots[full_guide] = []
+            offtarget_predictions[full_guide] = []
+            start_time = time()
+            current_targets_oh = full_targets_oh[current_mms<=n_mm*4]
+            current_guide_oh = np.tile(
+                    full_guide_oh, current_targets_oh.shape[0]
+                ).reshape(current_targets_oh.shape[0], current_targets_oh.shape[1])
+            current_predictions = np.argmax(
+                logic.offtarget_predict(current_guide_oh, current_targets_oh), 1
+            )
+            plausible_ots[full_guide] = list(full_targets[current_mms<=n_mm*4][current_predictions == 1])
+            print(time()-start_time)
+        n_off = np.array([len(plausible_ots[a]) if a in plausible_ots else 0 for a in full_guides])
+        act_n = -n_off/np.max(n_off)
+        app_state[sid]["n_off"] = n_off
+        app_state[sid]["norm_n_off"] = act_n 
+        d = {"X": guides_a, "Y": act_n}
+        app_state[sid]["offtargets"] = plausible_ots
+        return(
+            #"ololo"
+            html.Div(
+                [
+                    offtarget_sector(d, effector, cart, sid), copyright()
+                ]
+            )
+        )
     elif tab == "tab-2":
+        print("tab-2", app_state[sid]["cart"])
         d = None
         if dna and dna["dna"] != "" and effector:
             dna = dna["dna"]
@@ -523,56 +555,22 @@ def render_content(tab, sid, dna, effector, organism, cart, mode, n_mm):
             internal = internal.reshape((internal.shape[0], 64))
             coords = logic.transform(internal)
             activity = logic.regress(internal)
-            app_state["guides"] = guides
-            app_state["sequences"] = np.array([a[0] for a in guides])
-            app_state["representations"] = internal
-            app_state["coords"] = coords
-            app_state["activities"] = activity
-            app_state["labels"] = label
-            app_state["strands"] = strands
+            app_state[sid]["guides"] = guides
+            app_state[sid]["sequences"] = np.array([a[0] for a in guides])
+            app_state[sid]["representations"] = internal
+            app_state[sid]["coords"] = coords
+            app_state[sid]["activities"] = activity
+            app_state[sid]["labels"] = label
+            app_state[sid]["strands"] = strands
             #plausible_ots = []
-            print("Searching for plausible off-targets")
-            full_targets = np.array([
-                b+p[0] if not logic.pam_before else p[-1]+b 
-                    for b,p in list(zip(current_index["sequences"], current_index["PAM"]))
-            ])
-            full_targets_oh = np.stack([correct_order(onehot(a)) for a in full_targets])
-            full_guides = [a[0]+a[-1][0] if not logic.pam_before else a[-1][-1]+a[0] for a in guides]
-            for full_guide in tqdm(full_guides):
-                full_guide_oh = correct_order(onehot(full_guide))
-                plausible_ots[full_guide] = []
-                offtarget_predictions[full_guide] = []
-                for b in np.arange(0, len(full_targets), logic.offtarget_batch_size):
-                    current_batch = full_targets_oh[b:b+logic.offtarget_batch_size]
-                    current_mms = np.apply_along_axis(lambda x: np.sum(np.abs(x-full_guide_oh)), 1, current_batch)
-                    current_targets = full_targets[b:b+logic.offtarget_batch_size]
-                    current_targets_oh = current_batch[current_mms<=n_mm*4]
-                    current_guide_oh = np.tile(
-                        full_guide_oh, current_targets_oh.shape[0]
-                    ).reshape(current_targets_oh.shape[0], current_targets_oh.shape[1])
-                    current_predictions = np.argmax(
-                        logic.offtarget_predict(current_guide_oh, current_targets_oh), 1
-                    )
-                    final_ots = current_targets[current_mms<=n_mm*4][current_predictions == 1]
-                    plausible_ots[full_guide].extend(list(final_ots))
-            act_n = np.array([len(plausible_ots[a]) if a in plausible_ots else 0 for a in full_guides])
-            n_off = -act_n/np.max(act_n)
-            app_state["act_n"] = act_n
-            app_state["n_off"] = n_off
             d = {
                 "coords": coords, "activity": activity, "guide": guides, 
-                "label": label, "strand": strands, "OTS": n_off, "#offtargets": act_n
+                "label": label, "strand": strands
             }
-            for a in d:
-                if a != "coords":
-                    reporter.db[sid+"_"+a] = d[a]
-                else:
-                    reporter.db[sid+"_UMAP1"] = d[a][:,0]
-                    reporter.db[sid+"_UMAP2"] = d[a][:,1]
         return(
             html.Div(
                 [
-                    work_sector(d, effector, cart, mode), copyright()
+                    work_sector(d, effector, cart, sid), copyright()
                 ]
             )
         )
@@ -656,81 +654,133 @@ def copyright():
         )
     )
 
-def work_sector(guides, effector, cart, mode):
-    xaxis = ""
-    yaxis = ""
+
+def offtarget_sector(guides, effector, cart, sid):
+    xaxis = "X"
+    yaxis = "Y"
+    sequences = [
+        a+","+"activity:"+str(b)+","+"#offtargets:"+str(c)
+            for a,b,c in zip(
+                app_state[sid]["cart"], app_state[sid]["cart_activities"], 
+                app_state[sid]["n_off"]
+            )
+    ]
+    trace0 = go.Scatter(
+        x=guides["X"],
+        y=guides["Y"],
+        mode="markers",
+        marker=dict(
+            size=32,
+            showscale=False,
+            color="blue"
+        ),
+        text=sequences,
+        hoverinfo="text"
+    )
+    return(
+        html.Div([
+            html.Div(
+                [
+                    html.Div([dcc.Graph(
+                        id='g3', 
+                        figure={
+                            'data': [trace0],
+                            'layout': go.Layout(
+                                xaxis={'title': "X"},
+                                yaxis={'title': "Y"},
+                                height=900
+                            )
+                        }
+                    )], id="plot_space_2", className="nine columns"),
+                    html.Hr(),
+                    html.Center(html.H4("Guide cart")),
+                    html.Div([guidecart(sid)], id="guide-cart-2", style={'fontSize': '12px'}),
+                    html.Hr(),
+                    html.Img(id="offtargetmm"),
+                    html.Br(),
+                    "Off-target mismatch composition",
+                    html.Hr(),
+                    html.Center([html.Button("Off-target report", id="off-repbutton")]),
+                    html.Div([], id="off-report-link"),
+                    html.Hr()
+                ], className="row"
+            )
+        ])
+    )
+
+def work_sector(guides, effector, cart, sid):
+    xaxis = "UMAP 1"
+    yaxis = "UMAP 2"
     if guides:
         info = []
-        for a,b,c,d,e in zip(guides["guide"], guides["activity"], guides["label"], guides["strand"], guides["#offtargets"]):
+        for a,b,c,d in zip(guides["guide"], guides["activity"], guides["label"], guides["strand"]):
             info.append(
-                str(a)+"; Activity:"+str(b)+"; Label:"+str(c)+"; Strand:"+str(d)+"; "+"#offtargets:"+str(e)+";")
-        if mode == "pareto":
-            traces = [
-                plotter.get_offtargets(
-                    guides["activity"], guides["OTS"], info
-                )   
-            ]
-            xaxis = "On-target activity"
-            yaxis = "Negative max-normalized number of off-targets"
-        elif mode == "space":
-            traces = [
-                plotter.get_background(
-                    np.array(logic.background["coordinates"]), 
-                    np.array(logic.background["labels"]), 
-                    np.array(logic.background["labels"])
-                ),
-                plotter.get_guide(guides["coords"], guides["label"], guides["activity"], info)
-            ]
-            xaxis = "UMAP 1"
-            yaxis = "UMAP 2"
+                str(a)+"; Activity:"+str(b)+"; Label:"+str(c)+"; Strand:"+str(d)+";")
+        traces = [
+            plotter.get_background(
+                np.array(logic.background["coordinates"]), 
+                np.array(logic.background["labels"]), 
+                np.array(logic.background["labels"])
+            ),
+            plotter.get_guide(guides["coords"], guides["label"], guides["activity"], info)
+        ]
+        if len(app_state[sid]["cart"]) > 0:
+            activity = app_state[sid]["activities"]
+           # n_off = app_state[sid]["n_off"]
+            labels = app_state[sid]["labels"]
+            guides = app_state[sid]["guides"]
+            strands = app_state[sid]["strands"]
+            #act_n = app_state[sid]["act_n"]
+            info = []
+            in_cart = np.array([a.split(",")[0] for a in app_state[sid]["cart"]])
+            for a,b,c,d in zip(guides, activity, labels, strands):
+                gs = ",".join([a[0], str(a[1]), str(a[2]), a[3]])
+                info.append(
+                    gs+"; Activity:"+str(b)+"; Label:"+str(c)+"; Strand"+str(d)+";"# Off-targets:"+str(e)
+                )
+            gc = np.array([a.split(",")[0] in in_cart for a in info])
+            coords = app_state[sid]["coords"]
+            traces.append(
+                plotter.get_guide_cart(
+                    coords[gc], labels[gc], 
+                    activity[gc], np.array(info)[gc]
+                )
+            )
     else:
         traces = [plotter.empty_plot()]
     return(
         html.Div([
             html.Div(
                 [
-                    dcc.Dropdown(
-                        options=[
-                            {"label": "Guide space", "value": "space"},
-                            {"label": "Pareto front", "value": "pareto"}
-                        ], value="space", id="mode-choice"
-                    )
-                ]
-            ),
-            html.Div(
-                [
                     html.Div([dcc.Graph(
                         id='g2', 
                         figure=plotter.make_plot(traces, xaxis=xaxis, yaxis=yaxis)
-                    )], id="plot_space", className="ten columns"),
+                    )], id="plot_space", className="nine columns"),
                     html.Div(
                         [
                             html.Center(html.H4("Guide cart")),
-                            html.Div([guidecart(cart)], id="guide-cart", style={'fontSize': '12px'}),
-                            html.Hr(),
-                            html.Center([html.Button("Report", id="repbutton")]),
-                            html.Div([], id="report-link"),
+                            html.Div([guidecart(sid)], id="guide-cart", style={'fontSize': '12px'}),
                             html.Hr(),
                             html.Img(id='ontargetvicinity'),
                             html.Br(),
                             "On-target vicinity",
                             html.Hr(),
-                            html.Img(id="offtargetmm"),
-                            html.Br(),
-                            "Off-target mismatch composition"
+                            html.Center([html.Button("On-target report", id="on-repbutton")]),
+                            html.Div([], id="on-report-link"),
+                            html.Hr()
                         ], className="two columns")
                 ], className="row"
             )
         ])
     )
 
-def guidecart(guides):
-    if len(guides) > 0:
-        if len(guides) < 20:
-            shown = [a for a in guides] 
+def guidecart(sid):
+    if sid in app_state:
+        if len(app_state[sid]["cart"]) < 20:
+            shown = [a for a in app_state[sid]["cart"]] 
         else: 
-            shown = [a for a in guides[0:19]]
-            shown.append("+ "+str(len(guides)-19)+" guides")
+            shown = [a for a in app_state[sid]["cart"][0:19]]
+            shown.append("+ "+str(len(app_state[sid]["cart"])-19)+" guides")
     else:
         shown = ["Cart is empty"]
     return(
@@ -738,47 +788,55 @@ def guidecart(guides):
     )
 
 @app.callback(
-    Output("cart-store", "data"), [Input("g2", "clickData")], [State("cart-store", "data")]
+    Output("cart-store", "data"), [Input("g2", "clickData")], [State("session-id", "children")]
 )
-def change_guide_cart(clickData, cart):
-    cD = list(filter(lambda x: "text" in x, clickData["points"]))[0]
-    sequence = re.search("[ATGC]+", cD["text"])[0]
-    current = sequence.replace(" ", "")
-    selected = [current]
-    if cart:
-        if "in cart" in cD["text"] or current in cart["cart"]:
-            ck = np.array(cart["cart"])
-            selected = list(ck[ck != current])
-        else:
-            selected = cart["cart"]+selected
-    return({"cart": selected})
+def change_guide_cart(clickData, sid):
+    if clickData:
+        cD = list(filter(lambda x: "text" in x, clickData["points"]))[0]
+        #print(cD["text"])
+        try:
+            sequence = re.search("[ATGC]+,\d+,\d+,[ATGC]+", cD["text"])[0]
+        except:
+            sequence = re.search("[ATGC]+\',\s\d+,\s\d+,\s\'[ATGC]+", cD["text"])[0]
+        finally:
+            current = sequence.replace(" ", "").replace("'", "")
+            if current in app_state[sid]["cart"]:
+                app_state[sid]["cart"].pop(
+                    app_state[sid]["cart"].index(current)
+                )
+            else:
+                app_state[sid]["cart"].append(current)
+            return({"cart": []})
 
 @app.callback(
     Output("guide-cart", "children"),
-    [Input("cart-store", "data")], [State("guide-cart", "children")]
+    [Input("cart-store", "data")], [State("session-id", "children")]
 )
-def show_guide_cart(cart, current_cart):
+def show_guide_cart(cart, sid):
     if cart:
         cart = cart["cart"]
     else:
         cart = []
     return(
-        guidecart(cart)
+        guidecart(sid)
     )
-
+    
+    
 @app.callback(
     Output("ontargetvicinity", "src"),
-    [Input("cart-store", "data")]#, Input('session-id', 'children'), Input("mode-store", "data")]
+    [Input("session-id", "children"), Input("cart-store", "data")]
 )
-def update_ontarget_logo(cart):
+def update_ontarget_logo(sid, cart):
     if cart:
-        current_sequence = [a for a in cart["cart"]][-1]
+        current_sequence = [a for a in app_state[sid]["cart"]][-1].split(",")[0]
         current_onehot = correct_order(onehot(current_sequence))
         current_representation = logic.predict(
             current_onehot.reshape(1, len(current_sequence)*4)
         )[0].reshape(1,64)
         current_coords = logic.transform(current_representation).reshape(2)
-        current_d2b = np.apply_along_axis(lambda a: np.sum(np.abs(a-current_coords)), 1, logic.background["coordinates"])
+        current_d2b = np.apply_along_axis(
+            lambda a: np.sum(np.abs(a-current_coords)), 1, logic.background["coordinates"]
+        )
         top_k = list(sorted(np.arange(current_d2b.shape[0]), key=lambda x: current_d2b[x]))
         top_k = np.array(top_k[0:logic.k])
         top_k_seq = np.array(logic.background["sequences"])[top_k]
@@ -788,78 +846,59 @@ def update_ontarget_logo(cart):
 
 @app.callback(
     Output("offtargetmm", "src"),
-    [Input("cart-store", "data")]
+    [Input("session-id", "children"), Input("g3", "clickData")],
+    #[State("mismatch-store", "data")]
 )
-def update_offtarget_logo(cart):
-    if cart:
-        current_sequence = [a for a in cart["cart"]][-1]
-        current_guide = list(filter(lambda x: x[0] == current_sequence, app_state["guides"]))[0]
-        if not logic.pam_before:
-            current_full_guide = current_guide[0]+current_guide[-1][0]
-        else:
-            current_full_guide = current_guide[-1][-1]+current_guide[0]
+def update_offtarget_logo(sid, clickData):#, n_mm):
+    if clickData:
+        cD = list(filter(lambda x: "text" in x, clickData["points"]))[0]
+        current_sequence = [a for a in cD["text"].split(",")][0]
+        current_pam = [a for a in cD["text"].split(",")][3]
+        full_guide = current_sequence+current_pam[0] if not logic.pam_before else current_pam[0]+current_sequence
         img_fn = "".join([str(a) for a in np.random.choice(np.arange(10), 12)])+".png"
-        logoworker.logo_of_list(plausible_ots[current_full_guide], img_fn)
+        logoworker.logo_of_list(app_state[sid]["offtargets"][full_guide], img_fn)
         return(static_image_route+img_fn)
-        
+    
 @app.callback(
     Output("plot_space", "children"),
-    [Input("cart-store", "data"), Input('session-id', 'children'), Input("mode-store", "data")], 
+    [Input("cart-store", "data"), Input('session-id', 'children')],
     [State("plot_space", "children"), State("effector-store", "data")]
 )
-def plot_cart(cart, sid, mode, old_plot, effector):
-    if not mode:
-        mode = "space"
-    else:
-        mode = mode["mode"]
+def plot_cart(cart, sid, old_plot, effector) :
     if effector:
         effector = effector["effector"]
-    activity = app_state["activities"]
-    n_off = app_state["n_off"]
-    labels = app_state["labels"]
-    guides = app_state["guides"]
-    strands = app_state["strands"]
-    act_n = app_state["act_n"]
+    activity = app_state[sid]["activities"]
+    #n_off = app_state[sid]["n_off"]
+    labels = app_state[sid]["labels"]
+    guides = app_state[sid]["guides"]
+    strands = app_state[sid]["strands"]
+    #act_n = app_state[sid]["act_n"]
     info = []
-    in_cart = np.array([a for a in cart["cart"]]) if cart else np.array([])
-    for a,b,c,d,e in zip(guides, activity, labels, strands, act_n):
+    in_cart = np.array([a.split(",")[0] for a in app_state[sid]["cart"]])
+    for a,b,c,d in zip(guides, activity, labels, strands):
         gs = ",".join([a[0], str(a[1]), str(a[2]), a[3]])
         info.append(
-            gs+"; Activity:"+str(b)+"; Label:"+str(c)+"; Strand"+str(d)+"; Off-targets:"+str(e)
+            gs+"; Activity:"+str(b)+"; Label:"+str(c)+"; Strand"+str(d)#+"; Off-targets:"+str(e)
         )
     gc = np.array([a.split(",")[0] in in_cart for a in info])
-    xaxis = ""
-    yaxis = ""
-    if mode == "pareto":
-        traces = [
-            plotter.get_offtargets(
-                activity[np.invert(gc)], n_off[np.invert(gc)], np.array(info)[np.invert(gc)]
-            ),
-            plotter.get_pareto_cart(
-                activity[gc], n_off[gc], [a+" in cart;" for a in np.array(info)[gc]]
-            )
-        ]
-        xaxis = "On-target activity"
-        yaxis = "Negative max-normalized number of off-targets"
-    elif mode == "space":
-        coords = app_state["coords"]
-        traces = [
-            plotter.get_background(
-                np.array(logic.background["coordinates"]), 
-                np.array(logic.background["labels"]), 
-                np.array(logic.background["labels"])
-            ),
-            plotter.get_guide(
-                coords[np.invert(gc)], labels[np.invert(gc)], 
-                activity[np.invert(gc)], np.array(info)[np.invert(gc)]
-            ),
-            plotter.get_guide_cart(
-                coords[gc], labels[gc], 
-                activity[gc], np.array(info)[gc]
-            )
-        ]
-        xaxis = "UMAP 1"
-        yaxis = "UMAP 2"
+    coords = app_state[sid]["coords"]
+    traces = [
+        plotter.get_background(
+            np.array(logic.background["coordinates"]), 
+            np.array(logic.background["labels"]), 
+            np.array(logic.background["labels"])
+        ),
+        plotter.get_guide(
+            coords[np.invert(gc)], labels[np.invert(gc)], 
+            activity[np.invert(gc)], np.array(info)[np.invert(gc)]
+        ),
+        plotter.get_guide_cart(
+            coords[gc], labels[gc], 
+            activity[gc], np.array(info)[gc]
+        )
+    ]
+    xaxis = "UMAP 1"
+    yaxis = "UMAP 2"
     return(
         [
             dcc.Graph(
@@ -890,13 +929,6 @@ def set_dna(dna):
         {"dna": dna}
     )
 
-@app.callback(Output("mode-store", "data"),
-              [Input("mode-choice", "value")])
-def set_mode(mode):
-    return(
-        {"mode": mode}
-    )
-
 @server.route("/reports/<path:path>")
 def download(path):
     """Serve a file from the upload directory."""
@@ -913,33 +945,58 @@ def serve_image(image_path):
     return(flask.send_from_directory(image_directory, image_name))
 
 @app.callback(
-    Output("report-link", "children"),
-    [Input("repbutton", "n_clicks")], 
+    Output("on-report-link", "children"),
+    [Input("on-repbutton", "n_clicks")], 
     [State("session-id", "children"), State("cart-store", "data")]
 )
-def report(n, sid, cart):
+def on_report(n, sid, cart):
     if n:
-        try:
-            df = reporter.get_df(sid)
-        except:
-            return(html.Center("No report is produced"))
-        else:
-            fns = []
-            if cart:
-                #cart_n = [int(a.split(":")[0]) for a in cart["cart"]]
-                b = df["guide"].apply(lambda x: x in cart["cart"])
-                cart_df = df[b]
-                fns.append(reporter.get_fasta(cart_df))
-            else:
-                cart_df = pd.DataFrame({"status":["none chosen"]})
-            df_s = df.sort_values(by="activity", ascending=False)
-            html_s = reporter.get_on_html(df_s, cart_df)
-            fns.append(reporter.get_pdf(html_s))
-            fns.append(reporter.get_fasta(df_s))
-            file = Reporter.zip_file(fns)
-            link = file_download_link(file)
-            return(html.Center(link))
-
+        s1 = [a[0] for a in app_state[sid]["guides"]]
+        s2 = [a[1] for a in app_state[sid]["guides"]]
+        s3 = [a[2] for a in app_state[sid]["guides"]]
+        s4 = [a[3] for a in app_state[sid]["guides"]]
+        data = pd.DataFrame(
+            {
+                "sequence": s1,
+                "start": s2,
+                "end": s3,
+                "PAM": s4,
+                "activity": app_state[sid]["activities"],
+                "labels": app_state[sid]["labels"],
+                "strands": ["+" if a == 1 else "-" for a in app_state[sid]["strands"]]
+            }
+        )
+        data["chosen?"] = data["sequence"].isin([a.split(",")[0] for a in app_state[sid]["cart"]])
+        pdf, fasta_all, fasta_chosen = get_on_html(data, logic.on_report)
+        file = zip_file([pdf, fasta_all, fasta_chosen])
+        return(html.Center(file_download_link(file)))
+        
+@app.callback(
+    Output("off-report-link", "children"),
+    [Input("off-repbutton", "n_clicks")], 
+    [State("session-id", "children"), State("cart-store", "data")]
+)
+def off_report(n, sid, cart):
+    if n:
+        s1 = [a.split(",")[0] for a in app_state[sid]["cart"]]
+        s2 = [a.split(",")[1] for a in app_state[sid]["cart"]]
+        s3 = [a.split(",")[2] for a in app_state[sid]["cart"]]
+        s4 = [a.split(",")[3] for a in app_state[sid]["cart"]]
+        data = pd.DataFrame(
+            {
+                "sequence": s1,
+                "start": s2,
+                "end": s3,
+                "PAM": s4,
+                "activity": app_state[sid]["cart_activities"],
+                "n_off": app_state[sid]["n_off"],
+                "norm_n_off": app_state[sid]["norm_n_off"]
+            }
+        )
+        pdf, fasta = get_off_html(data, logic.off_report)
+        file = zip_file([pdf, fasta])
+        return(html.Center(file_download_link(file)))
+        
 @app.callback(Output('input-dna', 'value'),
     [Input('upload-data', 'contents')],
     [State('upload-data', 'filename')])
@@ -957,5 +1014,4 @@ def load_file(contents, filename):
             return("There was an error processing this file: "+str(e))
         
         
-if __name__ == '__main__':
-    app.run_server(host='0.0.0.0', port=1488, debug=False)
+app.run_server(host='0.0.0.0', port=PORT, debug=False)
