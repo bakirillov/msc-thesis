@@ -40,7 +40,10 @@ RUN apt install -y --fix-missing libpango1.0-dev
 RUN pip install weasyprint
 RUN pip install googledrivedownloader
 
-COPY . /app
-RUN python3.6 ./download_models.py
+RUN which python
 
-CMD ["python3.6", "cad.py"]
+COPY . /app
+RUN which python
+RUN python ./download_models.py
+
+CMD ["python", "cad.py"]
