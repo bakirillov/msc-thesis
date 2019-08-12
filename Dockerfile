@@ -37,9 +37,6 @@ RUN wget https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh
 RUN bash Anaconda3-5.0.1-Linux-x86_64.sh -b
 RUN rm Anaconda3-5.0.1-Linux-x86_64.sh
 ENV PATH /home/ubuntu/anaconda3/bin:$PATH
-RUN conda update conda
-RUN conda update anaconda
-RUN conda update --all
 RUN conda install -c bioconda weblogo
 WORKDIR /app
 
