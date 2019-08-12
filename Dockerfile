@@ -18,6 +18,7 @@ RUN pip install vedis
 RUN pip install scikit-image
 RUN pip install -U scikit-learn
 RUN pip install tpot
+RUN pip install catboost
 RUN git clone https://github.com/bakirillov/capsules
 RUN pip install umap-learn
 RUN pip install biopython
@@ -33,8 +34,7 @@ RUN conda update anaconda
 RUN conda update --all
 RUN conda install -c bioconda weblogo
 
-RUN python3.6 ./download_models.py
-
 COPY . /app
+RUN python3.6 ./download_models.py
 
 CMD ["python3.6", "cad.py"]
