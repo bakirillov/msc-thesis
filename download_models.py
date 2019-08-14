@@ -29,11 +29,6 @@ gdd.download_file_from_google_drive(
     unzip=True
 )
 gdd.download_file_from_google_drive(
-    file_id='1OvY5yN2TRjnFdBFY2gdUObdZiSFO5z4B',
-    dest_path='./models/test/test_index.pkl',
-    unzip=True
-)
-gdd.download_file_from_google_drive(
     file_id='1nRF0pVnoV0hMehQlBAIf9QSErfdq6y7N',
     dest_path='./models/test/test_umap.bin',
     unzip=True

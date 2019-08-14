@@ -1,27 +1,16 @@
-FROM ubuntu:18.04
+FROM ubuntu:latest
 
 WORKDIR /app
 
-RUN apt update
-RUN apt install -y build-essential python3.6 python3.6-dev python3-pip python3.6-venv
-RUN apt install -y git
+RUN apt-get update
+RUN apt-get install -y build-essential python3.6 python3.6-dev python3-pip python3.6-venv
+RUN apt-get install -y git
 RUN git clone https://github.com/bakirillov/capsules
-RUN apt -y install libcairo2-dev
+RUN apt-get update
+RUN apt-get install -y --fix-missing libcairo2-dev
 RUN apt-get install -y wget bzip2
 RUN apt-get -y install sudo
-RUN apt install -y libsm6 libxext6 libfontconfig1 libxrender1 wget
-RUN adduser --disabled-password --gecos '' ubuntu
-RUN adduser ubuntu sudo
-RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-USER ubuntu
-WORKDIR /home/ubuntu/
-RUN chmod a+rwx /home/ubuntu/
-RUN wget https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh
-RUN bash Anaconda3-5.0.1-Linux-x86_64.sh -b
-RUN rm Anaconda3-5.0.1-Linux-x86_64.sh
-ENV PATH /home/ubuntu/anaconda3/bin:$PATH
-RUN conda install -c bioconda weblogo
-WORKDIR /app
+RUN apt-get install -y libsm6 libxext6 libfontconfig1 libxrender1 wget
 RUN python3.6 -m pip install pip --upgrade
 RUN python3.6 -m pip install wheel
 RUN pip install --upgrade setuptools
@@ -35,14 +24,14 @@ RUN pip install -U scikit-learn
 RUN pip install catboost
 RUN pip install umap-learn
 RUN pip install biopython
-RUN sudo apt install -y --fix-missing libpango1.0-dev
+RUN pip install weblogo==3.6.0
+RUN sudo apt-get install -y --fix-missing libpango1.0-dev
 RUN pip install weasyprint
 RUN pip install googledrivedownloader
-
-RUN which python
+RUN pip install requests
+RUN pip install tqdm
 
 COPY . /app
-RUN which python
-RUN sudo /home/ubuntu/anaconda3/bin/python ./download_models.py
+RUN python3.6 ./download_models.py
 
-CMD ["sudo /home/ubuntu/anaconda3/bin/python", "cad.py"]
+CMD ["python3.6", "./cad.py"]
