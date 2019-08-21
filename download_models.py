@@ -9,27 +9,27 @@ gdd.download_file_from_google_drive(
 )
 print("Downloading models")
 gdd.download_file_from_google_drive(
-    file_id='1EpbM_G_i_p582H2FMAAuE5x_XaUgSy3N',
+    file_id='1qyrn52q41cGQV2Yddn1pSMjeKToFxcbn',
     dest_path='./models/test/gecrispr.cat',
     unzip=True
 )
 gdd.download_file_from_google_drive(
-    file_id='1K9_D0oQjesGFY2Y6R_BPqhzpxzBRuZCA',
-    dest_path='./models/test/peng_siamese.ptch',
+    file_id='1kio_VU01m1dKjn-l8LZDSwF3-FfAySzo',
+    dest_path='./models/test/peng_difference.ptch',
     unzip=True
 )
 gdd.download_file_from_google_drive(
-    file_id='1hk0y6D9NrnSwCn9DXfCel8BxKkCJAys8',
+    file_id='1Pc08PSrAkylMCF68wcIvQ-Pm138vjxrM',
     dest_path='./models/test/revcore_full_model_2.ptch',
     unzip=True
 )
 gdd.download_file_from_google_drive(
-    file_id='1sr538gO_5_QQSax1zrwcbzh6ZrLrYzui',
+    file_id='10xzvjIKCjLArEEoi4YeQX5iJs7Tx4SKG',
     dest_path='./models/test/test_background.pkl',
     unzip=True
 )
 gdd.download_file_from_google_drive(
-    file_id='1nRF0pVnoV0hMehQlBAIf9QSErfdq6y7N',
+    file_id='12m7-Vkzdwy9IylTeOb6ve4n5L4bc0jCk',
     dest_path='./models/test/test_umap.bin',
     unzip=True
 )
