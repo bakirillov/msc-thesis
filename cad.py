@@ -123,8 +123,9 @@ class Logic():
         )
     
     def offtarget_predict(self, A, B):
+        D = A-B
         return(
-            self.off_model.predict(A, B)
+            self.off_model.batch_predict(D, 128, True)[2]
         )
     
     @staticmethod
