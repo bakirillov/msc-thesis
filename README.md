@@ -4,18 +4,15 @@ Paper coming soon
 
 ### How to run?
 
-1. Download the test models (https://drive.google.com/open?id=16vpNypJoY9_5_agDy-YWIICSG1ZjSybj) and index (https://drive.google.com/open?id=1O19ZxEu7fPeQ5jHYGH12aZmU7ms3TdbK)
-2. Unpack the test folder into models
-3. Unpack ecoli.pkl to indices
+1. Run download_models.py
+2. Move ecoli.pkl to indices
+3. Move everything else to models
 4. Run python cad.py   
 
 Alternatively, try building Docker image with docker build and run it with docker run.
 
 ### How to use?
-Watch this video - https://www.youtube.com/watch?v=_Bpsv2EyyAg (OUTDATED!)
-
-### Notes
-For a large genome full-scale off-target search takes a lot of time. Try search with only preselected guides.
+Watch this video - https://www.youtube.com/watch?v=_Bpsv2EyyAg (OUTDATED! UP-TO-DATE VIDEO COMING SOON)
 
 ### Cpf1 off-target positive set
 https://gist.github.com/bakirillov/5a07565f7b608da8dfc2e182ef9a0696
